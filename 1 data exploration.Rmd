@@ -1,0 +1,33 @@
+---
+title: "1 data exploration"
+author: "Paul Hively"
+date: "August 4, 2016"
+output: html_document
+---
+
+The goal of this project is to identify covariates and factors associated with scholarship funds. A predictive model would be nice, but for now my main focus is explanation.
+
+Load the libraries and data and do some cleanup.
+
+```{r, message=F, warning=F, cache=F}
+source("LIBRARIES.R")
+dat <- read.csv("data\\2016-08-03 ABEM FY17.csv", header=T, stringsAsFactors=F)
+
+## Data cleanup
+mdat <- dat %>%
+  # Select desired columns
+  select(student.gifts = Giving.Student.Support, id = Entity.ID, employ.yrs = Employ.Years.At.Current.Company, nice.title = Bus.Title.High.Lvl, gift.cap = Gift.Capacity.Numerical.Amt..CR., fys.giving = Giving.FYs.of.Giving, fys.recent = Giving.FY.in.Last.5, first.gift = Giving.First.Trans.Amt, af.giving = Giving.Booth.AF.Gifts, spouse = Spouse.Married.UC.Booth, known.to = Rel.Known.Tos.Count, committees = Committee.in.Last.3.FY, vols = Vol.Acts..BUS., speak = Events.Vol.Speaker, stu.acts = Student.Acts..BUS., scholarship = Scholarships.Count, events = Events.Attended..BUS., nonprofit = Nonprofit.Leadership.Flag) %>%
+  # Convert string columns to factor
+  mutate(nice.title = as.factor(nice.title), spouse = as.factor(spouse), nonprofit = as.factor(nonprofit)) %>%
+  # Convert currency columns to numeric
+  CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving"))
+# Replace NAs with 0
+mdat[is.na(mdat)] <- 0
+
+# View random sample of resulting data
+set.seed(123)
+rand <- sample(1:nrow(mdat), nrow(mdat))
+str(mdat %>% select(-id) %>% slice(rand))
+```
+
+Here, `student.gifts` is the outcome variable being measured. I've (semi-arbitrarily) chosen a few variables to examine based on my own judgement and suggestions from the rest of the team.
