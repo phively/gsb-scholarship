@@ -11,14 +11,35 @@ Load the libraries and data and do some cleanup.
 
 ```{r, message=F, warning=F, cache=F}
 source("LIBRARIES.R")
-dat <- read.csv("data\\2016-08-03 ABEM FY17.csv", header=T, stringsAsFactors=F)
+dat <- read.csv("data\\2016-08-09 ABEM FY17.csv", header=T, stringsAsFactors=F)
 
 ## Data cleanup
 mdat <- dat %>%
   # Select desired columns
-  select(student.gifts = Giving.Student.Support, id = Entity.ID, employ.yrs = Employ.Years.At.Current.Company, nice.title = Bus.Title.High.Lvl, gift.cap = Gift.Capacity.Numerical.Amt..CR., fys.giving = Giving.FYs.of.Giving, fys.recent = Giving.FY.in.Last.5, first.gift = Giving.First.Trans.Amt, af.giving = Giving.Booth.AF.Gifts, spouse = Spouse.Married.UC.Booth, known.to = Rel.Known.Tos.Count, committees = Committee.in.Last.3.FY, vols = Vol.Acts..BUS., speak = Events.Vol.Speaker, stu.acts = Student.Acts..BUS., scholarship = Scholarships.Count, events = Events.Attended..BUS., nonprofit = Nonprofit.Leadership.Flag) %>%
+  select(student.gifts = Giving.Student.Support,
+         id = Entity.ID,
+         employ.yrs = Employ.Years.At.Current.Company,
+         nice.title = Bus.Title.High.Lvl,
+         gift.cap = Gift.Capacity.Numerical.Amt..CR.,
+         fys.giving = Giving.FYs.of.Giving,
+         fys.recent = Giving.FY.in.Last.5,
+         first.gift = Giving.First.Trans.Amt,
+         af.giving = Giving.Booth.AF.Gifts,
+         spouse = Spouse.Married.UC.Booth,
+         known.to = Rel.Known.Tos.Count,
+         stewardee = Alloc.Stewardee.Student.Support,
+         committees = Committee.in.Last.3.FY,
+         vols = Vol.Acts..BUS.,
+         speak = Events.Vol.Speaker,
+         stu.acts = Student.Acts..BUS.,
+         lead.facil = Student.Acts.LEAD.Facilitator,
+         stu.supp = Vol.Act.Student.Supporter,
+         scholarship = Scholarships.Count,
+         events = Events.Attended..BUS.,
+         events.stu = Events.Attended..BUS..Student,
+         nonprofit = Nonprofit.Leadership.Flag) %>%
   # Convert string columns to factor
-  mutate(nice.title = as.factor(nice.title), spouse = as.factor(spouse), nonprofit = as.factor(nonprofit)) %>%
+  mutate(spouse = as.factor(spouse)) %>%
   # Convert currency columns to numeric
   CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving"))
 # Replace NAs with 0
@@ -30,4 +51,61 @@ rand <- sample(1:nrow(mdat), nrow(mdat))
 str(mdat %>% select(-id) %>% slice(rand))
 ```
 
-Here, `student.gifts` is the outcome variable being measured. I've (semi-arbitrarily) chosen a few variables to examine based on my own judgement and suggestions from the rest of the team.
+Here, `student.gifts` (dollars given to student support) is the outcome variable being measured. I've (semi-arbitrarily) chosen a few variables to examine based on my own judgement and suggestions from the rest of the team. Begin by looking for plausible transformations.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+## Drop $0 donors
+ggdat <- mdat %>% filter(student.gifts > 0)
+# Base, and 3 basic transformations
+ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=10000) + labs(title="Student support giving, untransformed") + scale_x_continuous(labels=scales::dollar)
+ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=100) + labs(title="Student support giving, square root transformation") + scale_x_sqrt(labels=scales::dollar)
+ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=.25) + labs(title=expression(paste("Student support giving, ", log[10], " transformation"))) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
+
+# Log 10 transformation is the best
+mdat <- mdat %>% mutate(student.gifts.lt = log(student.gifts, base=10))
+ggdat <- mdat %>% filter(student.gifts > 0)
+```
+
+As usual, the $\text{log}_{10}$ transformation looks good. It does require dropping non-donors; one thought is to fit an explanatory model only to (a random sample of) those people who have made gifts and make predictions for the rest of the population. Of course, there's no particular reason to think donors and non-donors are comparable, but it's a starting point.
+
+Exploring the factors and covariates:
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Tabulation of spouses
+kable(
+  mdat %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(count = sum(count), mean.giving = mean(student.gifts)),
+  digits=2
+)
+kable(
+  mdat %>% filter(student.gifts > 0) %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(donor.count = sum(count), mean.donor.giving = mean(student.gifts)),
+  digits=2
+)
+# Histogram of transformed giving by spouses
+ggplot(ggdat, aes(x=student.gifts, y=..density..)) + geom_density() + geom_histogram(alpha=.5, binwidth=.25) + labs(title=expression(paste("Student support giving, ", log[10], " transformation"))) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL) + facet_grid(spouse ~ .)
+```
+
+Ignoring other covariates, married donors are more generous than unmarried ones. On to the numerical variables.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Length of employment
+ggplot(ggdat, aes(x=employ.yrs, y=student.gifts)) + geom_point() + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
+# Nice title (high-level)
+ggplot(ggdat, aes(x=factor(nice.title), y=student.gifts)) + geom_boxplot(alpha=.5) + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
+# Gift capacity
+ggplot(ggdat, aes(x=gift.cap, y=student.gifts)) + geom_point(alpha=.5) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL) + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
+# Total FYs of giving
+# Recent FYs (last 5) of giving
+# First gift amount
+# Years of AF giving
+# Known to count
+# Number of student allocations as a stewardee
+# Number of committees
+# Number of volunteer activities
+# Number of speaking engagements
+# Lead Facilitator indicator
+# Student supporter indicator
+# Number of scholarships
+# Booth events attended
+# Booth student events attended
+# Nonprofit board membership
+```
