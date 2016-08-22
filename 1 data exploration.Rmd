@@ -40,6 +40,10 @@ mdat <- dat %>%
          nonprofit = Nonprofit.Leadership.Flag) %>%
   # Convert string columns to factor
   mutate(spouse = as.factor(spouse)) %>%
+  # Convert string columns to factor
+  mutate(nice.title = as.factor(nice.title),
+         spouse = as.factor(spouse),
+         nonprofit = as.factor(nonprofit)) %>%
   # Convert currency columns to numeric
   CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving"))
 # Replace NAs with 0
@@ -80,32 +84,76 @@ kable(
   mdat %>% filter(student.gifts > 0) %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(donor.count = sum(count), mean.donor.giving = mean(student.gifts)),
   digits=2
 )
+
 # Histogram of transformed giving by spouses
 ggplot(ggdat, aes(x=student.gifts, y=..density..)) + geom_density() + geom_histogram(alpha=.5, binwidth=.25) + labs(title=expression(paste("Student support giving, ", log[10], " transformation"))) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL) + facet_grid(spouse ~ .)
+
+# Boxplot of giving by spouses
+ggplot(ggdat, aes(x=spouse, y=student.gifts)) + geom_boxplot(alpha=.5) + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
 ```
 
 Ignoring other covariates, married donors are more generous than unmarried ones. On to the numerical variables.
 
 ```{r, echo=F, message=F, warning=F, cache=F}
+# Axis formatting
+gg.y.logdollar <- list(scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL))
+gg.x.logdollar <- list(scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL))
+gg.fitline <- list(stat_smooth(method=lm, alpha=.25))
+
 # Length of employment
-ggplot(ggdat, aes(x=employ.yrs, y=student.gifts)) + geom_point() + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
+ggplot(ggdat, aes(x=employ.yrs, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
 # Nice title (high-level)
-ggplot(ggdat, aes(x=factor(nice.title), y=student.gifts)) + geom_boxplot(alpha=.5) + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
-# Gift capacity
-ggplot(ggdat, aes(x=gift.cap, y=student.gifts)) + geom_point(alpha=.5) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL) + scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
-# Total FYs of giving
-# Recent FYs (last 5) of giving
-# First gift amount
-# Years of AF giving
-# Known to count
-# Number of student allocations as a stewardee
-# Number of committees
-# Number of volunteer activities
-# Number of speaking engagements
-# Lead Facilitator indicator
-# Student supporter indicator
-# Number of scholarships
-# Booth events attended
-# Booth student events attended
-# Nonprofit board membership
+ggplot(ggdat, aes(x=factor(nice.title), y=student.gifts)) + geom_boxplot(alpha=.5) + gg.y.logdollar
 ```
+
+Being employed longer and having a fancy job title is associated with increased giving to student causes, ignoring other covariates. (I'm going to stop writing that but it's assumed for the rest.)
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Gift capacity
+ggplot(ggdat, aes(x=gift.cap, y=student.gifts)) + geom_point(alpha=.5) + gg.x.logdollar + gg.y.logdollar + gg.fitline
+# Total FYs of giving
+ggplot(ggdat, aes(x=fys.giving, y=student.gifts)) + geom_point(alpha=.5) + gg.y.logdollar + gg.fitline
+# Recent FYs (last 5) of giving
+ggplot(ggdat, aes(x=fys.recent, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# First gift amount
+ggplot(ggdat, aes(x=first.gift, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.x.logdollar + gg.fitline
+# Years of AF giving
+ggplot(ggdat, aes(x=af.giving, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+```
+
+Previous giving and gift capacity are strongly associated with other giving behaviors, as has been repeatedly found in the past. In particular, note the correlation between first gift and student giving amounts -- there are a few interesting patterns apaprent, such as the cluster of points around $x=y$ and shrinking variances as first gift amounts increase.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Known to count
+ggplot(ggdat, aes(x=known.to, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline + scale_x_sqrt() + labs(x="known.to (sqrt scale)")
+# Number of student allocations as a stewardee
+ggplot(ggdat, aes(x=stewardee, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Number of committees
+ggplot(ggdat, aes(x=committees, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Number of volunteer activities
+ggplot(ggdat, aes(x=vols, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Number of speaking engagements
+ggplot(ggdat, aes(x=speak, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Number of student activities
+ggplot(ggdat, aes(x=stu.acts, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Lead Facilitator indicator
+ggplot(ggdat, aes(x=as.factor(lead.facil), y=student.gifts)) + geom_boxplot(alpha=.5) + gg.y.logdollar
+# Student supporter indicator
+ggplot(ggdat, aes(x=as.factor(stu.supp), y=student.gifts)) + geom_boxplot(alpha=.5) + gg.y.logdollar
+# Booth events attended
+ggplot(ggdat, aes(x=events, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Booth student events attended
+ggplot(ggdat, aes(x=events.stu, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Nonprofit board membership
+ggplot(ggdat, aes(x=as.factor(nonprofit), y=student.gifts)) + geom_boxplot(alpha=.5) + gg.y.logdollar
+```
+
+A bit of a mixed bag here: people who are involved as *students* are not more likely to be donors, but those who are involved as alumni are. In particular, note the difference between student and alumni event attendance. Many of these are counts and should be transformed (sqrt) if used in a lm or glm.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Number of scholarships
+ggplot(ggdat, aes(x=scholarship, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+```
+
+And here's the big surprise: no association, or even slightly negative, between receiving scholarships and giving to student causes. I expect that receiving scholarships is associated with age, for example, so there might still be a story there.
+
