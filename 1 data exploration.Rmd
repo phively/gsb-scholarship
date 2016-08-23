@@ -1,5 +1,5 @@
 ---
-title: "1 data exploration"
+title: "1 Data Exploration"
 author: "Paul Hively"
 date: "August 4, 2016"
 output: html_document
@@ -18,6 +18,8 @@ mdat <- dat %>%
   # Select desired columns
   select(student.gifts = Giving.Student.Support,
          id = Entity.ID,
+         deg.year = Booth.ClassYr.or.RecYr,
+         deg.prg = Booth.Program.Group,
          employ.yrs = Employ.Years.At.Current.Company,
          nice.title = Bus.Title.High.Lvl,
          gift.cap = Gift.Capacity.Numerical.Amt..CR.,
@@ -39,13 +41,12 @@ mdat <- dat %>%
          events.stu = Events.Attended..BUS..Student,
          nonprofit = Nonprofit.Leadership.Flag) %>%
   # Convert string columns to factor
-  mutate(spouse = as.factor(spouse)) %>%
-  # Convert string columns to factor
-  mutate(nice.title = as.factor(nice.title),
-         spouse = as.factor(spouse),
-         nonprofit = as.factor(nonprofit)) %>%
+  mutate(deg.prg = as.factor(deg.prg),
+         spouse = as.factor(spouse)) %>%
   # Convert currency columns to numeric
-  CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving"))
+  CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving")) %>%
+  # Filter for current students
+  filter(deg.prg != '')
 # Replace NAs with 0
 mdat[is.na(mdat)] <- 0
 
@@ -61,7 +62,7 @@ Here, `student.gifts` (dollars given to student support) is the outcome variable
 ## Drop $0 donors
 ggdat <- mdat %>% filter(student.gifts > 0)
 # Base, and 3 basic transformations
-ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=10000) + labs(title="Student support giving, untransformed") + scale_x_continuous(labels=scales::dollar)
+ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=50000) + labs(title="Student support giving, untransformed") + scale_x_continuous(labels=scales::dollar)
 ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=100) + labs(title="Student support giving, square root transformation") + scale_x_sqrt(labels=scales::dollar)
 ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=.25) + labs(title=expression(paste("Student support giving, ", log[10], " transformation"))) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
 
@@ -71,6 +72,8 @@ ggdat <- mdat %>% filter(student.gifts > 0)
 ```
 
 As usual, the $\text{log}_{10}$ transformation looks good. It does require dropping non-donors; one thought is to fit an explanatory model only to (a random sample of) those people who have made gifts and make predictions for the rest of the population. Of course, there's no particular reason to think donors and non-donors are comparable, but it's a starting point.
+
+# Exploration
 
 Exploring the factors and covariates:
 
@@ -100,6 +103,15 @@ gg.y.logdollar <- list(scale_y_log10(labels=scales::dollar, breaks=10^(0:7), min
 gg.x.logdollar <- list(scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL))
 gg.fitline <- list(stat_smooth(method=lm, alpha=.25))
 
+# Degree year
+ggplot(ggdat, aes(x=deg.year, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+# Degree program
+ggplot(ggdat, aes(x=deg.prg, y=student.gifts)) + geom_boxplot(alpha=.5) + gg.y.logdollar
+```
+
+Younger alumni have given less, which follows given their lower lifetime earnings. Part-time alumni appear to be less philanthropic than the others.
+
+```{r, echo=F, message=F, warning=F, cache=F}
 # Length of employment
 ggplot(ggdat, aes(x=employ.yrs, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
 # Nice title (high-level)
@@ -157,3 +169,35 @@ ggplot(ggdat, aes(x=scholarship, y=student.gifts)) + geom_point() + gg.y.logdoll
 
 And here's the big surprise: no association, or even slightly negative, between receiving scholarships and giving to student causes. I expect that receiving scholarships is associated with age, for example, so there might still be a story there.
 
+# Variable importance
+
+Random forests (Breiman) are an established ensemble method for classification and regression. We can see which (untransformed) variables are selected by the model as a proxy for variable importance.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Remove unused variables
+rf.dat <- ggdat %>% select(-id, -student.gifts)
+# Variable importance (tree method)
+rf <- randomForest(student.gifts.lt ~ ., data=rf.dat, importance=T)
+# Extract importances
+rf.imp <- data.frame(importance(rf, scale=F))
+ggplot(rf.imp, aes(x=rownames(rf.imp), y=X.IncMSE)) + geom_bar(stat="identity", alpha=.5) + geom_text(aes(x=rownames(rf.imp), y=X.IncMSE+.01, ymax=X.IncMSE, label=round(X.IncMSE, 2)), size=3, alpha=.5) + theme(axis.text.x=element_text(angle=90, hjust=1)) + labs(title="Variable importances", x="Variable", y="Increase in MSE")
+```
+
+This measure of variable importance gives the percent change in MSE after removing the variable. Unsurprisingly, being a current stewardee of a scholarship fund is the best predictor, followed by first gift size and gift capacity. Try again without these three indicators:
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Remove unused variables
+rf.dat <- ggdat %>% select(-id, -student.gifts, -stewardee, -gift.cap, -first.gift)
+# Variable importance (tree method)
+rf <- randomForest(student.gifts.lt ~ ., data=rf.dat, importance=T)
+# Extract importances
+rf.imp <- data.frame(importance(rf, scale=F))
+ggplot(rf.imp, aes(x=rownames(rf.imp), y=X.IncMSE)) + geom_bar(stat="identity", alpha=.5) + geom_text(aes(x=rownames(rf.imp), y=X.IncMSE+.01, ymax=X.IncMSE, label=round(X.IncMSE, 2)), size=3, alpha=.5) + theme(axis.text.x=element_text(angle=90, hjust=1)) + labs(title="Variable importances", x="Variable", y="Increase in MSE")
+```
+
+Now the engagement indicators really pop. For modeling, `stewardee` and `gift.cap` should certainly be dropped, and `first.gift` is borderline, as it's perfectly correlated with the response variable `student.gifts` in many cases as seen during exploration above.
+
+# Packages used
+```{r}
+session_info()
+```
