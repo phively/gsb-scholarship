@@ -57,7 +57,7 @@ mdat[is.na(mdat)] <- 0
 # View random sample of resulting data
 set.seed(123)
 rand <- sample(1:nrow(mdat), nrow(mdat))
-str(mdat %>% select(-id) %>% slice(rand))
+mdat %>% select(-id) %>% slice(rand) %>% str()
 ```
 
 Here, `student.gifts` (dollars given to student support) is the outcome variable being measured. I've (semi-arbitrarily) chosen a few variables to examine based on my own judgement and suggestions from the rest of the team. Begin by looking for plausible transformations.
@@ -85,14 +85,8 @@ Exploring the factors and covariates. All plots exclude non-donors:
 
 ```{r, echo=F, message=F, warning=F, cache=F}
 # Tabulation of spouses
-kable(
-  mdat %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(count = sum(count), mean.giving = mean(student.gifts)),
-  digits=2
-)
-kable(
-  mdat %>% filter(student.gifts > 0) %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(donor.count = sum(count), mean.donor.giving = mean(student.gifts)),
-  digits=2
-)
+mdat %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(count = sum(count), mean.giving = mean(student.gifts)) %>% kable(digits=2)
+mdat %>% filter(student.gifts > 0) %>% mutate(count = 1) %>% group_by(spouse) %>% summarise(donor.count = sum(count), mean.donor.giving = mean(student.gifts)) %>% kable(digits=2)
 
 # Histogram of transformed giving by spouses
 ggplot(ggdat, aes(x=student.gifts, y=..density..)) + geom_density() + geom_histogram(alpha=.5, binwidth=.25) + labs(title=expression(paste("Student support giving, ", log[10], " transformation"))) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL) + facet_grid(spouse ~ .)
@@ -179,7 +173,7 @@ And here's the big surprise: no association, or even slightly negative, between 
 
 Random forests (Breiman) are an established ensemble method for classification and regression. We can see which (untransformed) variables are selected by the model as a proxy for variable importance.
 
-```{r, echo=F, message=F, warning=F, cache=F}
+```{r, echo=F, message=F, warning=F, cache=T}
 # Remove unused variables
 rf.dat <- ggdat %>% select(-id, -student.gifts)
 # Variable importance (tree method)
@@ -197,7 +191,7 @@ ggplot(rf.imp, aes(x=reorder(rownames(rf.imp), X.IncMSE), y=X.IncMSE)) + geom_ba
 
 This measure of variable importance gives the percent change in MSE after removing the variable. Unsurprisingly, being a current stewardee of a scholarship fund is the best predictor, followed by first gift size and gift capacity. Try again without these three indicators:
 
-```{r, echo=F, message=F, warning=F, cache=F}
+```{r, echo=F, message=F, warning=F, cache=T}
 # Remove unused variables
 rf.dat <- ggdat %>% select(-id, -student.gifts, -stewardee, -gift.cap, -first.gift)
 # Variable importance (tree method)
@@ -209,6 +203,88 @@ ggplot(rf.imp, aes(x=reorder(rownames(rf.imp), X.IncMSE), y=X.IncMSE)) + geom_ba
 ```
 
 Now the engagement indicators really pop. For modeling, `stewardee` and `gift.cap` should certainly be dropped, and `first.gift` is borderline, as it's perfectly correlated with the response variable `student.gifts` in a subset of cases as seen during exploration above.
+
+# Basic linear model
+
+Begin with a basic lm with transformed variables.
+
+```{r, message=F, warning=F, cache=F}
+# Remove unused variables
+lmdat <- mdat %>% filter(student.gifts > 0) %>% select(-student.gifts, -stewardee, -gift.cap, -first.gift)
+# Recenter deg.year
+lmdat$deg.year.ctr <- lmdat$deg.year - min(lmdat$deg.year)
+# Linear model for donors
+lmod <- lm(
+  student.gifts.lt ~
+    # Low importance
+     spouse + sqrt(events.stu) + lead.facil + nice.title + sqrt(scholarship) + stu.supp +
+    # Use as-is
+    deg.year.ctr + deg.prg + nice.title + fys.recent + nonprofit +
+    # Sqrt transform
+    sqrt(employ.yrs) + sqrt(fys.giving) + sqrt(af.giving) + sqrt(known.to) + sqrt(committees) +
+    sqrt(vols) + sqrt(speak) + sqrt(stu.acts) + sqrt(events),
+  data=lmdat
+)
+
+# Model statistics
+summary(lmod)
+```
+
+Adjusted $r^2$ of .34 actually seems high to me for a first pass. Among the covariates, `deg.year` and the various engagement indicators are the most interesting. The factors `nice.title` and `nonprofit` are as expected. Before thinking about removing variables, check the diagnostic plots.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Half-normal quantiles
+QHalfNorm <- function(vec) {
+  n <- length(vec)
+  qnorm((n + 1:n) / (2 * n + 1))
+}
+# Create data
+ggdat <- data.frame(id = lmdat$id, residual = lmod$residuals, fitted = lmod$fitted.values, actual = lmdat$student.gifts.lt, hatv = hatvalues(lmod), cook = cooks.distance(lmod), hnorm = QHalfNorm(cooks.distance(lmod)), rown = 1:nrow(lmdat))
+# Plot fitted versus residual
+ggplot(ggdat, aes(x=fitted, y=residual)) + geom_point(alpha=.25) + labs(title="Residuals versus fitted values") + geom_hline(yintercept=0, alpha=.25)
+```
+
+Nonlinearity is apparent as a result of the skewness in `student.gifts`, even after log transformation. There's a bit of unequal variance as well. Taking a more aggressive transformation might help but would make the model less interpretable.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Calculate qqline based on quantiles of residuals
+stat_qqline <- function(vec) {
+  y <- quantile(vec, probs = c(.25, .75), na.rm = TRUE)
+  x <- qnorm(c(.25, .75))
+  a <- diff(y)/diff(x)
+  b <- y[1] - a * x[1]
+  return(
+    list(geom_abline(slope = a, intercept = b, alpha = .25))
+  )
+}
+# Plot observed versus fitted quantiles
+ggplot(ggdat, aes(sample=residual)) + stat_qq(alpha=.25) + stat_qqline(ggdat$residual) + labs(title="Observed versus fitted quantiles")
+```
+
+As expected, giving data is thick-tailed -- at the extremes, there are both more high and low donors than expected.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Plot Cook's distances
+ggplot(ggdat, aes(x=hnorm, y=sort(cook))) + geom_point(alpha=.25) + labs(title="Cook's distance versus half-normal quantiles", x="Half-normal quantiles", y="Cook's distance")
+# Residual versus leverage
+ggplot(ggdat, aes(x=hatv, y=residual)) + geom_point(alpha=.25) + labs(title="Residuals vs. Leverage", x="Hat values")
+```
+
+Definitely a few extreme values there...
+
+```{r, message=F, warning=F, cache=F}
+ggdat %>% arrange(cook) %>% select(rown, cook, residual, hatv) %>% tail() %>% kable(digits=3)
+ggdat %>% arrange(hatv) %>% select(rown, hatv, residual, cook) %>% tail() %>% kable(digits=3)
+```
+
+The five largest Cook's distances and leverages. Row 1730 is strange, with high leverage but no residual.
+
+```{r, message=F, warning=F, cache=F}
+summary(lmdat$deg.prg)
+which(lmdat$deg.prg == "Other")
+```
+
+No wonder -- it's the only `deg.prg = Other` donor. The Program factor should be tweaked.
 
 # Packages used
 ```{r}
