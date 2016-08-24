@@ -1,9 +1,11 @@
 ---
-title: "1 Data Exploration"
+title: "Scholarship Data Exploration"
 author: "Paul Hively"
 date: "August 4, 2016"
 output: html_document
 ---
+
+Source available [here](https://github.com/phively/gsb-scholarship/blob/master/1%20data%20exploration.Rmd).
 
 The goal of this project is to identify covariates and factors associated with scholarship funds. A predictive model would be nice, but for now my main focus is explanation.
 
@@ -40,12 +42,14 @@ mdat <- dat %>%
          events = Events.Attended..BUS.,
          events.stu = Events.Attended..BUS..Student,
          nonprofit = Nonprofit.Leadership.Flag) %>%
+  # Drop null rows
+  filter(!is.na(id)) %>%
   # Convert string columns to factor
-  mutate(deg.prg = as.factor(deg.prg),
+  mutate(deg.prg = as.factor(deg.prg) %>% relevel("Full-Time"),
          spouse = as.factor(spouse)) %>%
   # Convert currency columns to numeric
   CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving")) %>%
-  # Filter for current students
+  # Exclude non-alumni
   filter(deg.prg != '')
 # Replace NAs with 0
 mdat[is.na(mdat)] <- 0
@@ -65,17 +69,19 @@ ggdat <- mdat %>% filter(student.gifts > 0)
 ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=50000) + labs(title="Student support giving, untransformed") + scale_x_continuous(labels=scales::dollar)
 ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=100) + labs(title="Student support giving, square root transformation") + scale_x_sqrt(labels=scales::dollar)
 ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=.25) + labs(title=expression(paste("Student support giving, ", log[10], " transformation"))) + scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL)
-
 # Log 10 transformation is the best
-mdat <- mdat %>% mutate(student.gifts.lt = log(student.gifts, base=10))
-ggdat <- mdat %>% filter(student.gifts > 0)
 ```
 
 As usual, the $\text{log}_{10}$ transformation looks good. It does require dropping non-donors; one thought is to fit an explanatory model only to (a random sample of) those people who have made gifts and make predictions for the rest of the population. Of course, there's no particular reason to think donors and non-donors are comparable, but it's a starting point.
 
+```{r, message=F, warning=F, cache=F}
+mdat <- mdat %>% mutate(student.gifts.lt = log(student.gifts, base=10))
+ggdat <- mdat %>% filter(student.gifts > 0)
+```
+
 # Exploration
 
-Exploring the factors and covariates:
+Exploring the factors and covariates. All plots exclude non-donors:
 
 ```{r, echo=F, message=F, warning=F, cache=F}
 # Tabulation of spouses
@@ -109,7 +115,7 @@ ggplot(ggdat, aes(x=deg.year, y=student.gifts)) + geom_point() + gg.y.logdollar 
 ggplot(ggdat, aes(x=deg.prg, y=student.gifts)) + geom_boxplot(alpha=.5) + gg.y.logdollar
 ```
 
-Younger alumni have given less, which follows given their lower lifetime earnings. Part-time alumni appear to be less philanthropic than the others.
+Younger alumni have given less, which follows given their lower lifetime earnings. Part-time alumni appear to be less generous than the rest.
 
 ```{r, echo=F, message=F, warning=F, cache=F}
 # Length of employment
@@ -177,10 +183,16 @@ Random forests (Breiman) are an established ensemble method for classification a
 # Remove unused variables
 rf.dat <- ggdat %>% select(-id, -student.gifts)
 # Variable importance (tree method)
+set.seed(5640303)
 rf <- randomForest(student.gifts.lt ~ ., data=rf.dat, importance=T)
+```
+```{r, echo=F, message=F, warning=F, cache=F}
 # Extract importances
 rf.imp <- data.frame(importance(rf, scale=F))
-ggplot(rf.imp, aes(x=rownames(rf.imp), y=X.IncMSE)) + geom_bar(stat="identity", alpha=.5) + geom_text(aes(x=rownames(rf.imp), y=X.IncMSE+.01, ymax=X.IncMSE, label=round(X.IncMSE, 2)), size=3, alpha=.5) + theme(axis.text.x=element_text(angle=90, hjust=1)) + labs(title="Variable importances", x="Variable", y="Increase in MSE")
+# ggplot theme
+gg.rf.theme <- list(theme(axis.text.x=element_text(angle=90, hjust=1), panel.grid.minor=element_line(linetype="dotted")), labs(title="Variable importances", x="Variable", y="Increase in MSE"))
+# Plot importances
+ggplot(rf.imp, aes(x=reorder(rownames(rf.imp), X.IncMSE), y=X.IncMSE)) + geom_bar(stat="identity", alpha=.5) + scale_y_continuous(minor_breaks=seq(0, .5, .02)) + gg.rf.theme
 ```
 
 This measure of variable importance gives the percent change in MSE after removing the variable. Unsurprisingly, being a current stewardee of a scholarship fund is the best predictor, followed by first gift size and gift capacity. Try again without these three indicators:
@@ -189,13 +201,14 @@ This measure of variable importance gives the percent change in MSE after removi
 # Remove unused variables
 rf.dat <- ggdat %>% select(-id, -student.gifts, -stewardee, -gift.cap, -first.gift)
 # Variable importance (tree method)
+set.seed(7343507)
 rf <- randomForest(student.gifts.lt ~ ., data=rf.dat, importance=T)
 # Extract importances
 rf.imp <- data.frame(importance(rf, scale=F))
-ggplot(rf.imp, aes(x=rownames(rf.imp), y=X.IncMSE)) + geom_bar(stat="identity", alpha=.5) + geom_text(aes(x=rownames(rf.imp), y=X.IncMSE+.01, ymax=X.IncMSE, label=round(X.IncMSE, 2)), size=3, alpha=.5) + theme(axis.text.x=element_text(angle=90, hjust=1)) + labs(title="Variable importances", x="Variable", y="Increase in MSE")
+ggplot(rf.imp, aes(x=reorder(rownames(rf.imp), X.IncMSE), y=X.IncMSE)) + geom_bar(stat="identity", alpha=.5) + scale_y_continuous(minor_breaks=seq(0, .2, .01)) + gg.rf.theme
 ```
 
-Now the engagement indicators really pop. For modeling, `stewardee` and `gift.cap` should certainly be dropped, and `first.gift` is borderline, as it's perfectly correlated with the response variable `student.gifts` in many cases as seen during exploration above.
+Now the engagement indicators really pop. For modeling, `stewardee` and `gift.cap` should certainly be dropped, and `first.gift` is borderline, as it's perfectly correlated with the response variable `student.gifts` in a subset of cases as seen during exploration above.
 
 # Packages used
 ```{r}
