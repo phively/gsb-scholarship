@@ -284,7 +284,88 @@ summary(lmdat$deg.prg)
 which(lmdat$deg.prg == "Other")
 ```
 
-No wonder -- it's the only `deg.prg = Other` donor. The Program factor should be tweaked.
+No wonder -- it's the only `deg.prg = Other` donor. This factor should be tweaked, for example by combining the `Other` and `Ph.D.` levels.
+
+```{r, message=F, warning=F, cache=F}
+levels(lmdat$deg.prg) <- c("Full-Time", '', "EMBA", "Other", "Part-Time", "Other")
+lmdat <- lmdat %>% droplevels()
+```
+
+The `leaps` package can be used to check each subset of predictors to attempt to minimize the Bayesian information criterion.
+
+```{r, message=F, warning=F, cache=F}
+library(leaps)
+lm.leaps <- regsubsets(
+  student.gifts.lt ~
+    # Low importance
+     spouse + sqrt(events.stu) + lead.facil + nice.title + sqrt(scholarship) + stu.supp +
+    # Use as-is
+    deg.year.ctr + deg.prg + nice.title + fys.recent + nonprofit +
+    # Sqrt transform
+    sqrt(employ.yrs) + sqrt(fys.giving) + sqrt(af.giving) + sqrt(known.to) + sqrt(committees) +
+    sqrt(vols) + sqrt(speak) + sqrt(stu.acts) + sqrt(events),
+  data=lmdat,
+  nvmax=16)
+```
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Best subsets
+rsubs <- summary(lm.leaps)
+# Plot BIC
+ggdat <- data.frame(bic=rsubs$bic, p=(1:length(rsubs$bic)))
+ggplot(ggdat, aes(x=p, y=bic)) + geom_point(alpha=.5) + geom_line(alpha=.25) + labs(title="BIC for different model sizes")
+```
+
+BIC is minimized by the following variables:
+
+```{r, message=F, warning=F, cache=F}
+# p minimizing BIC
+(best <- which(rsubs$bic == min(rsubs$bic)))
+# Best p variables (plus intercept) minimizing BIC
+colnames(rsubs$which)[rsubs$which[best, ]]
+```
+
+Using just these in a new model yields the following:
+
+```{r, message=F, warning=F, cache=F}
+# Trimmed dataset
+lmdat2 <- lmdat %>% mutate(emba = deg.prg=="EMBA") %>% select(id, nice.title, deg.year.ctr, emba, fys.recent, nonprofit, employ.yrs, known.to, committees, vols, speak, events, student.gifts.lt)
+# Trimmed model
+lmod2 <- lm(
+  student.gifts.lt ~
+    # Use as-is
+    nice.title + deg.year.ctr + emba + fys.recent + nonprofit +
+    # Sqrt transform
+    sqrt(employ.yrs) + sqrt(known.to) + sqrt(committees) + sqrt(vols) + sqrt(speak) + sqrt(events),
+  data=lmdat2
+)
+```
+
+The residual and other diagnostic plots come out about the same.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Residuals plot
+# Create data
+ggdat <- data.frame(id = lmdat2$id, residual = lmod2$residuals, fitted = lmod2$fitted.values, actual = lmdat2$student.gifts.lt, hatv = hatvalues(lmod2), cook = cooks.distance(lmod2), hnorm = QHalfNorm(cooks.distance(lmod2)), rown = 1:nrow(lmdat2))
+# Plot fitted versus residual
+ggplot(ggdat, aes(x=fitted, y=residual)) + geom_point(alpha=.25) + labs(title="Residuals versus fitted values") + geom_hline(yintercept=0, alpha=.25)
+```
+
+The model summary is interesting:
+
+```{r, echo=F, message=F, warning=F, cache=F}
+summary(lmod2)
+```
+
+On average, we'd guess that a donor to student causes has given about $2.27$ log dollars, or $10^2.27 = \$186$ without any other information. Younger alumni give less; all the other indicators increase giving on average.
+
+From these variables, `nice.title`, `deg.year`, `nonprofit`, `known.to`, `committees`, and `speak` are particularly interesting as indicators because they both have relatively large coefficients and a lot of associated data.
+
+# Future ideas
+
+* Prediction with cross-validation
+* Model including non-donors
+* [Tobit model](https://en.wikipedia.org/wiki/Tobit_model) for censored data
 
 # Packages used
 ```{r}

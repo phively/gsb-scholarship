@@ -1,4 +1,3 @@
-library(faraway)
 library(dplyr)
 library(lubridate)
 library(wranglR)
