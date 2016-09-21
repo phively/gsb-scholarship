@@ -99,8 +99,8 @@ Ignoring other covariates, married donors are more generous than unmarried ones.
 
 ```{r, echo=F, message=F, warning=F, cache=F}
 # Axis formatting
-gg.y.logdollar <- list(scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL))
-gg.x.logdollar <- list(scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL))
+gg.y.logdollar <- list(scale_y_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL, limits=c(10^0, 10^7)))
+gg.x.logdollar <- list(scale_x_log10(labels=scales::dollar, breaks=10^(0:7), minor_breaks=NULL, limits=c(10^0, 10^7)))
 gg.fitline <- list(stat_smooth(method=lm, alpha=.25))
 
 # Degree year
@@ -360,6 +360,30 @@ summary(lmod2)
 On average, we'd guess that a donor to student causes has given about $2.27$ log dollars, or $10^2.27 = \$186$ without any other information. Younger alumni give less; all the other indicators increase giving on average.
 
 From these variables, `nice.title`, `deg.year`, `nonprofit`, `known.to`, `committees`, and `speak` are particularly interesting as indicators because they both have relatively large coefficients and a lot of associated data.
+
+# Prospect prioritization
+
+From here, the simplest approach is to sort by predicted `student.gifts` within each gift capacity bin `gift.cap`.
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# Prediction data
+predsdat <- mdat %>% mutate(emba = deg.prg=="EMBA", deg.year.ctr = deg.year - min(lmdat$deg.year))
+# Predict on full dataset
+preds <- predict(lmod2, newdata=predsdat)
+
+# Plot expected versus actual
+ggdat <- data.frame(Predicted = 10^preds, Actual = predsdat$student.gifts)
+ggdat %>% ggplot(aes(x=Predicted, y=Actual)) + geom_point(alpha=.1) + gg.y.logdollar + gg.x.logdollar + labs(title="Predicted versus actual giving")
+```
+
+When including non-donors, the predicted amounts are biased high, unsurprisingly. The final step is to join the predictions and unique identifier and export the data. For this first pass, it's helpful to have the data in Excel for others to explore.
+
+```{r, message=F, warning=F, cache=F}
+# Save the id and prediction columns
+out <- predsdat %>% select(id) %>% mutate(preds=preds)
+# Save as tab-delimited text
+write.table(out, file="data\\predictions.csv", sep=",", row.names=F)
+```
 
 # Future ideas
 
