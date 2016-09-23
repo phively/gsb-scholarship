@@ -28,7 +28,8 @@ mdat <- dat %>%
          fys.giving = Giving.FYs.of.Giving,
          fys.recent = Giving.FY.in.Last.5,
          first.gift = Giving.First.Trans.Amt,
-         af.giving = Giving.Booth.AF.Gifts,
+         af.gifts = Giving.Booth.AF.Gifts,
+         lt.giving = Booth.Lifetime.Giving,
          spouse = Spouse.Married.UC.Booth,
          known.to = Rel.Known.Tos.Count,
          stewardee = Alloc.Stewardee.Student.Support,
@@ -48,7 +49,7 @@ mdat <- dat %>%
   mutate(deg.prg = as.factor(deg.prg) %>% relevel("Full-Time"),
          spouse = as.factor(spouse)) %>%
   # Convert currency columns to numeric
-  CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "af.giving")) %>%
+  CurrencyToNumeric(fields = c("student.gifts", "gift.cap", "first.gift", "lt.giving")) %>%
   # Exclude non-alumni
   filter(deg.prg != '')
 # Replace NAs with 0
@@ -75,7 +76,7 @@ ggplot(ggdat, aes(x=student.gifts)) + geom_histogram(alpha=.5, binwidth=.25) + l
 As usual, the $\text{log}_{10}$ transformation looks good. It does require dropping non-donors; one thought is to fit an explanatory model only to (a random sample of) those people who have made gifts and make predictions for the rest of the population. Of course, there's no particular reason to think donors and non-donors are comparable, but it's a starting point.
 
 ```{r, message=F, warning=F, cache=F}
-mdat <- mdat %>% mutate(student.gifts.lt = log(student.gifts, base=10))
+mdat <- mdat %>% mutate(student.gifts.lt = log(student.gifts, base=10), lt.giving.lt = log(lt.giving, base=10))
 ggdat <- mdat %>% filter(student.gifts > 0)
 ```
 
@@ -129,8 +130,10 @@ ggplot(ggdat, aes(x=fys.giving, y=student.gifts)) + geom_point(alpha=.5) + gg.y.
 ggplot(ggdat, aes(x=fys.recent, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
 # First gift amount
 ggplot(ggdat, aes(x=first.gift, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.x.logdollar + gg.fitline
+# Lifetime giving
+ggplot(ggdat, aes(x=lt.giving, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.x.logdollar + gg.fitline
 # Years of AF giving
-ggplot(ggdat, aes(x=af.giving, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
+ggplot(ggdat, aes(x=af.gifts, y=student.gifts)) + geom_point() + gg.y.logdollar + gg.fitline
 ```
 
 Previous giving and gift capacity are strongly associated with other giving behaviors, as has been repeatedly found in the past. In particular, note the correlation between first gift and student giving amounts -- there are a few interesting patterns apaprent, such as the cluster of points around $x=y$ and shrinking variances as first gift amounts increase.
@@ -210,7 +213,8 @@ Begin with a basic lm with transformed variables.
 
 ```{r, message=F, warning=F, cache=F}
 # Remove unused variables
-lmdat <- mdat %>% filter(student.gifts > 0) %>% select(-student.gifts, -stewardee, -gift.cap, -first.gift)
+lmdat <- 
+  mdat %>% filter(student.gifts > 0) %>% select(-student.gifts, -stewardee, -gift.cap, -first.gift)
 # Recenter deg.year
 lmdat$deg.year.ctr <- lmdat$deg.year - min(lmdat$deg.year)
 # Linear model for donors
@@ -221,7 +225,7 @@ lmod <- lm(
     # Use as-is
     deg.year.ctr + deg.prg + nice.title + fys.recent + nonprofit +
     # Sqrt transform
-    sqrt(employ.yrs) + sqrt(fys.giving) + sqrt(af.giving) + sqrt(known.to) + sqrt(committees) +
+    sqrt(employ.yrs) + sqrt(fys.giving) + sqrt(af.gifts) + sqrt(known.to) + sqrt(committees) +
     sqrt(vols) + sqrt(speak) + sqrt(stu.acts) + sqrt(events),
   data=lmdat
 )
@@ -302,7 +306,7 @@ lm.leaps <- regsubsets(
     # Use as-is
     deg.year.ctr + deg.prg + nice.title + fys.recent + nonprofit +
     # Sqrt transform
-    sqrt(employ.yrs) + sqrt(fys.giving) + sqrt(af.giving) + sqrt(known.to) + sqrt(committees) +
+    sqrt(employ.yrs) + sqrt(fys.giving) + sqrt(af.gifts) + sqrt(known.to) + sqrt(committees) +
     sqrt(vols) + sqrt(speak) + sqrt(stu.acts) + sqrt(events),
   data=lmdat,
   nvmax=16)
@@ -388,9 +392,6 @@ When including non-donors, the predicted amounts are biased high, unsurprisingly
 out <- predsdat %>%
   select(id, actual = student.gifts.lt) %>%
   mutate(preds = preds, actual = ifelse(actual <= 0, 0, actual), residual = actual - preds)
-
-# Save as tab-delimited text
-write.table(out, file="data\\predictions.csv", sep=",", row.names=F)
 ```
 
 Here's the distribution of differences:
@@ -418,6 +419,33 @@ ggdat %>% ggplot(aes(x=residual, color=Capacity, fill=Capacity)) + geom_density(
 ```
 
 The vertical dashed lines indicate the cutoff for the 250 largest (gave more than expected) and 250 smallest (gave less than expected) residuals. Note that this is a mixture that is not even approximately centered around 0 -- this follows given that these residuals include out-of-sample individuals who have never given.
+
+This does raise a question: can I get a better model if I account for non-student support lifetime giving? Here's the previous $r^2$:
+
+```{r, echo=F, message=F, warning=F, cache=F}
+summary(lmod2)$r.squared
+```
+
+And here's the new $r^2$ when including a term for `lt.giving` -- `student.gifts`
+
+```{r, message=F, warning=F, cache=F}
+# Add lifetime giving to lmdat2
+lmdat2 <- lmdat2 %>% cbind(mdat %>% filter(student.gifts > 0) %>% select(lt.giving) %>%
+  # Log10 transformation
+  mutate(lt.giving.lt = log(lt.giving, base=10)))
+# Use same model as lmod2, adding (lt.giving) as a predictor
+lmod3 <- update(lmod2, . ~ . + I(lt.giving.lt - student.gifts.lt))
+summary(lmod3)
+```
+
+Hmm, interesting. That is a substantial improvement, and doesn't actually affect the magnitude (or "significance") of the other coefficients much.
+
+
+
+```{r, message=F, warning=F, cache=F}
+# Save as tab-delimited text
+write.table(out, file="data\\predictions.csv", sep=",", row.names=F)
+```
 
 # Future ideas
 
