@@ -367,23 +367,57 @@ From here, the simplest approach is to sort by predicted `student.gifts` within 
 
 ```{r, echo=F, message=F, warning=F, cache=F}
 # Prediction data
-predsdat <- mdat %>% mutate(emba = deg.prg=="EMBA", deg.year.ctr = deg.year - min(lmdat$deg.year))
+predsdat <- mdat %>% mutate(emba = deg.prg=="EMBA", deg.year.ctr = deg.year - min(lmdat$deg.year)) %>% filter(deg.prg != "") %>% droplevels()
 # Predict on full dataset
 preds <- predict(lmod2, newdata=predsdat)
 
-# Plot expected versus actual
-ggdat <- data.frame(Predicted = 10^preds, Actual = predsdat$student.gifts)
-ggdat %>% ggplot(aes(x=Predicted, y=Actual)) + geom_point(alpha=.1) + gg.y.logdollar + gg.x.logdollar + labs(title="Predicted versus actual giving")
+# Plot expected versus actual, all data
+ggdat <- data.frame(Predicted = 10^preds, Actual = predsdat$student.gifts, Capacity = predsdat$gift.cap) %>%
+  mutate(Capacity = ifelse(Capacity == 0, "Unrated",
+                    ifelse(Capacity <= 100000, " Up to $100k",
+                    ifelse(Capacity > 100000, " Over $100k",
+                           "Unrated"))) %>% as.factor())
+ggdat %>% ggplot(aes(x=Predicted, y=Actual, color=Capacity)) + geom_point(alpha=.25) + gg.y.logdollar + gg.x.logdollar +
+  labs(title="Predicted versus actual giving, all data")
 ```
 
-When including non-donors, the predicted amounts are biased high, unsurprisingly. The final step is to join the predictions and unique identifier and export the data. For this first pass, it's helpful to have the data in Excel for others to explore.
+When including non-donors, the predicted amounts are biased high, unsurprisingly. The final step is to join the predictions and unique identifier and export the data. For this first pass, it's helpful to have the data in Excel for others to explore. I'd been asked for a list of "200 to 1000 prospects" so people who have given substantially more or less than predicted are a reasonable place to start.
 
 ```{r, message=F, warning=F, cache=F}
 # Save the id and prediction columns
-out <- predsdat %>% select(id) %>% mutate(preds=preds)
+out <- predsdat %>%
+  select(id, actual = student.gifts.lt) %>%
+  mutate(preds = preds, actual = ifelse(actual <= 0, 0, actual), residual = actual - preds)
+
 # Save as tab-delimited text
 write.table(out, file="data\\predictions.csv", sep=",", row.names=F)
 ```
+
+Here's the distribution of differences:
+
+```{r, echo=F, message=F, warning=F, cache=F}
+# 250 largest and smallest residuals
+q <- 250/length(out$res)
+q <- list(quantile(out$residual, q),
+          quantile(out$residual, 1-q))
+# Set up the data
+ggdat <- out %>% mutate(Capacity = predsdat$gift.cap) %>%
+    mutate(Capacity = ifelse(Capacity == 0, "Unrated",
+                    ifelse(Capacity <= 100000, " Up to $100k",
+                    ifelse(Capacity > 100000, " Over $100k",
+                           "Unrated"))) %>% as.factor())
+# Check the distribution of lower and higher than expected
+ggdat %>% ggplot(aes(x=residual)) + geom_histogram(bins=50, alpha=.5) + geom_hline(yintercept=0, color="white") +
+  geom_vline(xintercept=q[[1]], alpha=.2, linetype="dashed") + geom_vline(xintercept=q[[2]], alpha=.2, linetype="dashed") +
+  scale_y_sqrt(breaks=c(0, 1, 10, 100, 1000, seq(5000, 25000, by=5000)), minor_breaks=NULL) +
+  labs(title = "Histogram of residuals of full dataset", y = "count (sqrt scale)")
+# Boxplot of residuals
+ggdat %>% ggplot(aes(x=residual, color=Capacity, fill=Capacity)) + geom_density(alpha=.2) +
+  geom_vline(xintercept=q[[1]], alpha=.2, linetype="dashed") + geom_vline(xintercept=q[[2]], alpha=.2, linetype="dashed") +
+  labs(title = "Density of residuals by capacity rating")
+```
+
+The vertical dashed lines indicate the cutoff for the 250 largest (gave more than expected) and 250 smallest (gave less than expected) residuals. Note that this is a mixture that is not even approximately centered around 0 -- this follows given that these residuals include out-of-sample individuals who have never given.
 
 # Future ideas
 
