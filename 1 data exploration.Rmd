@@ -438,9 +438,7 @@ lmod3 <- update(lmod2, . ~ . + I(lt.giving.lt - student.gifts.lt))
 summary(lmod3)
 ```
 
-Hmm, interesting. That is a substantial improvement, and doesn't actually affect the magnitude (or "significance") of the other coefficients much.
-
-
+Hmm, interesting. That is a substantial improvement, and doesn't actually affect the magnitude (or "significance") of the other coefficients much. Maybe it's nearly orthogonal to the others in this space, but it's problematic for prediction in that it can't be calculated without knowing the response variable.
 
 ```{r, message=F, warning=F, cache=F}
 # Save as tab-delimited text
